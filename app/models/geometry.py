@@ -318,9 +318,10 @@ def measure_ears(mask, *, narrow_ratio: float = 0.5,
       B. **分**：外张的长耳（两耳合计宽度已接近头宽），顶部几行分裂成 ≥2 段
          （耳间缺口），向下合并成一段即结束。
 
-    耳宽取每行**前景段宽度的中位数**（分裂行 = 单耳宽，单段行 = 该段宽），
-    避免"耳根与头合并"把宽度算大。耳长是**下界**：正面轮廓里缺口通常在耳根
-    之前就闭合，真实耳长可能更长——结构层据此只设下限、不设上限。
+    耳宽取每行"单耳宽"在耳波段上的中位数：单段行 = 该段宽，分裂行 = 较窄的
+    那一叶（耳根与头合并的那一叶明显更宽，取它会把耳宽算胖）。耳长是**下界**：
+    正面轮廓里缺口通常在耳根之前就闭合，真实耳长可能更长——结构层据此只设
+    下限、不设上限。
 
     上下界（8%–45%）既排掉圆头（窄段过短）也排掉没分开主体/背景的掩码
     （窄段一路到底）。测不到返回 None，调用方不凭空加耳朵。
@@ -329,10 +330,22 @@ def measure_ears(mask, *, narrow_ratio: float = 0.5,
 
     if getattr(mask, "ndim", 0) != 2 or mask.shape[0] < 8:
         return None
+
+    def _lobe_width(runs) -> float:
+        """该行的"单耳宽"：单段行 = 该段宽；分裂行 = **较窄的那一叶**。
+
+        分裂行里通常有一叶是"耳 + 已与耳根合并的头顶"，明显更宽；取它会把
+        耳宽算胖（实测真照片 4.0cm vs 实际 ~3cm）。只把 ≥ 最宽叶一半的段算
+        作叶，滤掉噪点碎片。
+        """
+        widths = [e - s for s, e in runs]
+        if not widths:
+            return 0.0
+        return float(min(w for w in widths if w >= 0.5 * max(widths)))
+
     runs_per_row = [_row_runs(row, min_len=min_run) for row in mask]
     total = [sum(e - s for s, e in runs) for runs in runs_per_row]
-    median_run = [float(np.median([e - s for s, e in runs])) if runs else 0.0
-                  for runs in runs_per_row]
+    lobe_width = [_lobe_width(runs) for runs in runs_per_row]
     occupied = [bool(runs) for runs in runs_per_row]
     rows = [i for i, seen in enumerate(occupied) if seen]
     if len(rows) < 8:
@@ -355,7 +368,7 @@ def measure_ears(mask, *, narrow_ratio: float = 0.5,
     if len(band) > max_band_fraction * height:
         # 耳朵不可能占主体高度的一大半：掩码没分开主体与背景时窄段会一路走到底
         return None
-    width_ratio = float(np.median([median_run[i] for i in band])) / height
+    width_ratio = float(np.median([lobe_width[i] for i in band])) / height
     if width_ratio <= 0:
         return None
     return len(band) / height, width_ratio
