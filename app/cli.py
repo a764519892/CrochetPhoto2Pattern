@@ -287,7 +287,9 @@ def main(argv=None) -> int:
                 result, assemble=args.assemble).encode("utf-8")
         if args.pdf:
             from app.utils.pdf_export import export_pdf
-            exports["pdf"] = export_pdf(result["params"], result["analysis"], result=result)
+            exports["pdf"] = export_pdf(result["params"], result["analysis"],
+                                        result=result,
+                                        photo=getattr(args, "image", None))
         if preview:
             from app.utils.preview_export import export_preview
             exports["preview"] = export_preview(result, paths["preview"])

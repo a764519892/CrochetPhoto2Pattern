@@ -131,6 +131,9 @@ def build_payload(result: dict) -> dict[str, Any] | None:
 _YAW, _PITCH = 0.6, 0.35
 _SEG = 12          # 圆周分段（示意精度）
 _LIGHT = (0.4, 0.7, -0.6)
+# 背面不丢弃、按这个系数压暗后照画：凸面体的背面本来就被正面挡着，只有开口
+# 处（管口、旋转体底的收口锥）会看见——丢弃它们就会漏出背景，看着像模型是空壳。
+_BACKFACE_SHADE = 0.62
 
 
 def _hx(h: str) -> tuple[int, int, int]:
@@ -229,7 +232,8 @@ def _render_static_svg(payload: dict) -> str:
     尺寸按整体高度归一化适配画幅（修复旧 canvas 固定焦距下图形过小）。
     """
     W, H = 460, 420
-    faces: list[tuple[float, list, tuple, tuple]] = []
+    faces: list[tuple[float, list[tuple[float, float]], tuple[int, int, int],
+                      tuple[float, float, float], bool]] = []
     ys: list[float] = []
     for item in payload["items"]:
         rgb = _hx(item["color"])
@@ -263,13 +267,14 @@ def _render_static_svg(payload: dict) -> str:
                 nx, ny, nz = nx / nl, ny / nl, nz / nl
                 va, vb, vc = _view(*a), _view(*b), _view(*c)
                 _, _, nvz = _view(nx, ny, nz)
-                if nvz <= 0:      # 背面剔除（视图法线背向相机）
-                    continue
+                if (nvz <= 0) and not item.get("backfaces"):
+                    continue      # 背面剔除（视图法线背向相机）
                 vz = (va[2] + vb[2] + vc[2]) / 3.0
                 faces.append((vz,
                               [(va[0], va[1]), (vb[0], vb[1]),
                                (vc[0], vc[1])], rgb,
-                              (abs(nx), abs(ny), abs(nz))))
+                              (abs(nx), abs(ny), abs(nz)),
+                              nvz <= 0))
     if not faces:
         return ""
 
@@ -285,9 +290,9 @@ def _render_static_svg(payload: dict) -> str:
         f"font-family='{theme.FONT_SANS}'>",
         f'<rect width="{W}" height="{H}" fill="{theme.SHEET}"/>',
     ]
-    for _vz, pts, rgb, nabs in faces:
+    for _vz, pts, rgb, nabs, back in faces:
         d = max(0.0, sum(nabs[i] * _LIGHT[i] for i in range(3)))
-        k = 0.55 + 0.45 * d
+        k = (0.55 + 0.45 * d) * (_BACKFACE_SHADE if back else 1.0)
         fill = (f"rgb({round(rgb[0] * k)},{round(rgb[1] * k)},"
                 f"{round(rgb[2] * k)})")
         pstr = " ".join(f"{cx + x * scale:.1f},{cy - y * scale:.1f}"
@@ -300,6 +305,11 @@ def _render_static_svg(payload: dict) -> str:
         "示意预览（静态等距视图，非物理仿真）</text>")
     parts.append("</svg>")
     return "".join(parts)
+
+
+def render_payload_svg(payload: dict) -> str:
+    """payload → 静态等距 SVG（供分解图等逐件单独成帧；无可渲染面时返回 ""）。"""
+    return _render_static_svg(payload)
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
