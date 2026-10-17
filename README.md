@@ -90,7 +90,9 @@ Unknown part names remain available for review. Remove mistaken labels or select
 - Resizing preserves edited structures; explicit diameters, cup depths, and colors affect generation. Edited pattern gauge is shared by materials, exports, previews, and regeneration.
 - Editable 2D grid projects for tapestry, C2C, and cross-stitch workflows.
 - Stitch-arithmetic validation, ring charts, progress tracking, per-color bills of
-  materials, share links, SQLite history, JSON backup, Markdown, and optional PDF export.
+  materials, share links, SQLite history, JSON backup, Markdown, and an optional PDF
+  crochet manual (your photo, the finished-doll render, an exploded view, the round
+  tables, and a detailed tutorial).
 - Finished-doll preview export: `--preview` writes the same assembly preview the result
   page renders (real rounds as a lathe plus the anatomical layout) as `.svg` or `.png`.
 - EXIF orientation correction and defensive image/input size limits.

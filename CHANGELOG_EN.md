@@ -8,6 +8,16 @@ formats may still evolve during Beta; incompatible changes must include migratio
 
 ## Unreleased
 
+### Added — 2026-10-17 PDF crochet manual (photo + render + exploded parts + tutorial)
+
+- `--pdf` is no longer just text and tables: it reads as a Chinese manual — **my photo** (the local input file) beside the **finished-doll render** (the same renderer as the result page and `--preview`: real rounds as a lathe, the same anatomical layout as `--assemble`), then an **exploded view** where every part is framed on its own with a caption (rounds / max stitches / diameter / height / quantity), then the round tables and the tutorial.
+- Every part gains a one-line **rhythm** (`part_rhythm_text`): start ring → increase/decrease spans → colour change → fastening off, i.e. its round table read as one sentence. It only restates numbers already in that table and adds no extra steps; the wording is locked by tests.
+- A new **detailed crochet tutorial** (14 sections): tools and materials, the magic ring, single crochet / increase / decrease and the invisible decrease, spiral rounds, colour changes, how to read the round table, stuffing, fastening off, sewing parts together, face decoration, and an FAQ. It is generic craft convention and says so: it is not this tool's validation of physical hookability, and it keeps the safety note that dolls for children or pets must use embroidered eyes.
+- The photo is only re-encoded for layout (capped at 1600px, transparency flattened onto white, JPEG); the original file is untouched. `export_pdf(..., photo=)` accepts bytes or a path, falls back to the thumbnail embedded in `result["preview"]`, and simply omits the photo when neither exists. The photo never leaves the machine and is not stored; whether to share an export stays the user's call.
+- Any missing image (nothing renderable, rasterisation failure, unreadable photo) only costs that one image — the text pattern stays complete and the PDF never fails because of it.
+- A single-part figure looks straight into the lathe's closing cone, whose back-facing faces used to be culled and leaked the background (it read as a hollow shell). The renderer keeps back-faces (darkened to 0.62) when a payload item sets `backfaces`: default behaviour is unchanged — the result page and the finished-doll render look exactly as before — and only the exploded view opts in.
+- The tutorial originally numbered its sections ①②…; the PDF font (STSong-Light / Adobe-GB1) has ①–⑩ but not ⑪–⑭, which silently vanished. Headings now use Chinese numerals (一–十四), with a guard test forbidding ⑪–⑳.
+
 ### Added — 2026-10-17 CLI finished-doll preview export
 
 - `--preview` writes the finished-doll preview using the same renderer as the result page (each part's real rounds as a lathe, placed by the same anatomical layout as `--assemble`), as `.svg` vector or `.png` raster; batch mode exports `<stem>.preview<ext>` per image.
