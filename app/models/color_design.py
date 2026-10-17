@@ -98,8 +98,15 @@ def vertical_color_bands(image: Image.Image, n_bands: int = 10, *,
             return []
         # 主体掩码：GrabCut 优先（掩码与小图对齐），退化/不可用回退阈值法
         from .subject import color_interior, extract_subject
-        res = (subject.extract_colors(image) if subject is not None
-               else color_interior(extract_subject(image, max_side=160)))
+        # 投票取受光面（剔出成片的阴影/水印），证据记录用完整内景：配色的
+        # 深色细节照样进 observation，交给人工复核，不被投票口径抹掉。
+        if subject is not None:
+            evidence = subject.extract_colors(image)
+            res = subject.extract_lit_colors(image)
+        else:
+            seg = extract_subject(image, max_side=160)
+            evidence = color_interior(seg)
+            res = color_interior(seg, lit_only=True)
         mask = None if res is None else res[0]
         if mask is not None and mask.shape != (h, w):
             mask = None
@@ -107,6 +114,7 @@ def vertical_color_bands(image: Image.Image, n_bands: int = 10, *,
         if mask is None:
             bg = np.array(estimate_background(px), dtype=np.int16)
             mask = np.abs(px - bg).sum(axis=2) > _BG_DIST_THRESHOLD
+            evidence = None            # 回退路径没有主体取样，证据用同一掩码
             if mask.mean() < 0.05:
                 return []
         # Map actual foreground colors once, then vote per horizontal band.
@@ -135,7 +143,17 @@ def vertical_color_bands(image: Image.Image, n_bands: int = 10, *,
         if observation is not None:
             from .color_observation import build_observation
 
-            observation.update(build_observation(mask, pixel_ids, yarn_names, n_bands, mask_source))
+            evidence_mask = mask if evidence is None else evidence[0]
+            if evidence_mask is mask:
+                eids, enames = pixel_ids, yarn_names
+            else:
+                eunique, einverse = np.unique(px[evidence_mask], axis=0,
+                                              return_inverse=True)
+                ereps, _ergbs = nearest_yarn_batch(eunique)
+                enames, ereverse = np.unique(ereps, return_inverse=True)
+                eids = ereverse[einverse]
+            observation.update(build_observation(evidence_mask, eids, enames,
+                                                 n_bands, mask_source))
         if refine_stripes:
             bands = _refine_stripes(bands, mask, ys, pixel_ids, yarn_names)
         return _merge_bands(bands)

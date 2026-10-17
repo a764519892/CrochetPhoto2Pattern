@@ -57,6 +57,16 @@ _T_CHROMA_FLOOR = 8
 _T_CHROMA_CEIL = 48
 _CHROMA_FGD_FLOOR = 12
 
+# 配色投票时把"阴影/半透明水印"排除在外的判据：**比背景更暗**且**成片**。
+# 阴影与水印都是"同一表面被等比例压暗"——色度几乎不变、亮度明显下降，单看
+# 颜色与主体分不开（实测真照片的兔子暗部因此被映射成"深灰色"，凭空多出第二
+# 色）。所以还必须成片：细条纹、小斑块是真实深色特征（黑眼珠、深棕口鼻、衣服
+# 条纹），必须留在配色里（实测 4px 黑条纹在 k≥5 的开运算下清空，真照片的阴影
+# 在 k=5~7 时仍保留 80% 以上）。**只用于配色取样**，几何掩码、证据记录与分割
+# 一律用全量像素：剔除用在分割上会把深灰/中灰玩偶整只判没（见 extract_subject）。
+_SHADED_LUMA_RATIO = 0.8
+_SHADED_MIN_SPAN = 20     # 开运算核 ≈ 短边 / 20（160px 图上 8px，至少 5px）
+
 
 @dataclass
 class SubjectObservation:
@@ -101,11 +111,58 @@ class SubjectObservation:
             raise ValueError("主体观测只能用于创建它的图片")
         return self.color_segmentation
 
+    @cached_property
+    def lit_segmentation(self) -> tuple[np.ndarray, Image.Image] | None:
+        """配色投票用：剔出阴影/水印的受光面取样（证据记录仍用完整内景）。"""
+        return color_interior(self.segmentation, lit_only=True)
+
+    def extract_lit_colors(self, image: Image.Image) -> tuple[np.ndarray, Image.Image] | None:
+        if image is not self.image:
+            raise ValueError("主体观测只能用于创建它的图片")
+        return self.lit_segmentation
+
+
+def shaded_area(mask, image):
+    """``mask`` 内**成片**且比背景更暗的区域——阴影/半透明水印，不是主体本色。
+
+    阴影与水印都是"同一表面被等比例压暗"：色度几乎不变、亮度明显下降，单看
+    颜色与主体分不开（实测真照片的暗部就是暖米白主体的变暗）。所以判据必须
+    再加"成片"：细条纹、小斑块这类深色结构是真实特征，要留在配色里；只有大到
+    一定跨度的暗区才当阴影（实测 4px 黑条纹在 k≥5 的开运算下清空，而真照片的
+    阴影在 k=5~7 时仍保留 80% 以上）。
+    """
+    import cv2
+    import numpy as np
+
+    rgb8 = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    if mask.shape != rgb8.shape[:2]:
+        return np.zeros(mask.shape, bool)
+    _reps, rep_luma = background_reps(rgb8.astype(np.int16))
+    ycc = cv2.cvtColor(rgb8[:, :, ::-1].copy(), cv2.COLOR_BGR2YCrCb).astype(np.int16)
+    dark = mask & (ycc[:, :, 0] < _SHADED_LUMA_RATIO * float(np.median(rep_luma)))
+    if not dark.any():
+        return dark
+    k = max(5, min(mask.shape[:2]) // _SHADED_MIN_SPAN)
+    opened = cv2.morphologyEx(dark.astype(np.uint8), cv2.MORPH_OPEN,
+                              np.ones((k, k), np.uint8))
+    return opened.astype(bool)
+
 
 def color_interior(
     segmentation: tuple[np.ndarray, Image.Image] | None,
+    *, lit_only: bool = False, max_shaded_share: float = 0.4,
 ) -> tuple[np.ndarray, Image.Image] | None:
     """Remove mixed boundary pixels only for color sampling, never geometry.
+
+    ``lit_only`` also drops the shaded area (see shaded_area), so the colour vote
+    reads the lit surface: a single-colour toy photographed with shading must not
+    come out as two colours. Guard: this holds only while the lit part stays a
+    clear majority (more than ``1 - max_shaded_share``); a darker share
+    approaching half may be a body colour rather than shading (a black-and-white
+    two-tone toy), which colour alone cannot tell apart, so nothing is dropped.
+    The default is the complete interior: the evidence recorded for review must
+    not lose the dark details this vote filters out (callers that only vote pass
+    ``lit_only=True``).
 
     An empty interior is unavailable evidence; callers use their existing
     fallback. The input mask is not mutated.
@@ -119,6 +176,12 @@ def color_interior(
     if mask.shape != (image.height, image.width):
         return None
     interior = cv2.erode(mask.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+    if not interior.any():
+        return None
+    if lit_only:
+        lit = interior & ~shaded_area(interior, image)
+        if lit.sum() >= (1.0 - max_shaded_share) * interior.sum():
+            interior = lit
     return (interior, image) if interior.any() else None
 
 
@@ -170,6 +233,42 @@ def _face_box(small: Image.Image):
         return None
 
 
+def _strip_bounds(h: int, w: int) -> tuple[int, int]:
+    """确定性背景条带厚度：顶 h/12、左右 w/12（至少 2 像素）。"""
+    return max(2, h // 12), max(2, w // 12)
+
+
+def background_reps(rgb16) -> tuple[np.ndarray, np.ndarray]:
+    """顶+左右条带的背景代表色集合与各代表色亮度（RGB 0-255 / float）。
+
+    条带 = 顶部整条 + 左右整条（人像/玩偶照构图先验：顶与两侧几乎总有留白），
+    量化到 16 级/通道取**集合**而非众数——双色背景的第二种色多在侧条带占
+    20%+，不会漏。覆盖率门槛 15%：条带可能被主体上沿侵入（头部贴顶的照片），
+    小占比的主体色不得成为"可解释的背景色"，否则主体小孤立块会被数据项判回
+    背景（实测头部被吞）。
+
+    返回 (代表色 Nx3, 各代表色亮度 N)，让亮度档、色度档与配色取样共用同一份
+    背景参考，不各自重算。
+    """
+    import numpy as np
+
+    kt, ks = _strip_bounds(*rgb16.shape[:2])
+    strips = np.concatenate([
+        rgb16[:kt].reshape(-1, 3), rgb16[:, :ks].reshape(-1, 3),
+        rgb16[:, rgb16.shape[1] - ks:].reshape(-1, 3),
+    ])
+    qb = (strips // 16).astype(np.int32)
+    packed = qb[:, 0] * 256 + qb[:, 1] * 16 + qb[:, 2]
+    uniq, counts = np.unique(packed, return_counts=True)
+    reps = np.array([[(u >> 8 & 15) * 16 + 8, (u >> 4 & 15) * 16 + 8,
+                      (u & 15) * 16 + 8] for u in uniq], dtype=np.int16)
+    coverage = np.array([c / len(strips) for c in counts])
+    if (coverage >= 0.15).any():
+        reps = reps[coverage >= 0.15]
+    luma = 0.299 * reps[:, 0] + 0.587 * reps[:, 1] + 0.114 * reps[:, 2]
+    return reps, luma
+
+
 def extract_subject(
     image: Image.Image, max_side: int = 160
 ) -> tuple[np.ndarray, Image.Image] | None:
@@ -212,23 +311,8 @@ def extract_subject(
         #   GC_PR_BGD 其余：交给 GMM+图割精修
         rgb16 = arr[:, :, ::-1].astype(np.int16)
         from .color_design import _BG_DIST_THRESHOLD
-        kt, ks = max(2, h // 12), max(2, w // 12)
-        strips = np.concatenate([
-            rgb16[:kt].reshape(-1, 3), rgb16[:, :ks].reshape(-1, 3),
-            rgb16[:, w - ks:].reshape(-1, 3),
-        ])
-        # 条带颜色按 16 级/通道量化取代表色（集合，非众数——双色背景的
-        # 第二种色多在侧条带占 20%+，不会漏）。覆盖率门槛 15%：条带可能被
-        # 主体上沿侵入（头部贴顶的照片），小占比的主体色不得成为"可解释
-        # 的背景色"，否则主体小孤立块会被数据项判回背景（实测头部被吞）。
-        qb = (strips // 16).astype(np.int32)
-        packed = qb[:, 0] * 256 + qb[:, 1] * 16 + qb[:, 2]
-        uniq, counts = np.unique(packed, return_counts=True)
-        bg_reps = np.array([[(u >> 8 & 15) * 16 + 8, (u >> 4 & 15) * 16 + 8,
-                             (u & 15) * 16 + 8] for u in uniq], dtype=np.int16)
-        coverage = np.array([c / len(strips) for c in counts])
-        if (coverage >= 0.15).any():
-            bg_reps = bg_reps[coverage >= 0.15]
+        kt, ks = _strip_bounds(h, w)
+        bg_reps, rep_luma = background_reps(rgb16)
 
         img_q = (rgb16 // 16).astype(np.int32)
         img_packed = (img_q[..., 0] * 256 + img_q[..., 1] * 16 + img_q[..., 2])
@@ -248,10 +332,8 @@ def extract_subject(
         # 背景色度取**代表色集合**（与亮度档同一口径），不用条带中位数：
         # 双色背景的色度中位数落在两色之间，会把两种背景色都判成彩色。
         ycc = cv2.cvtColor(arr, cv2.COLOR_BGR2YCrCb).astype(np.int16)
-        _rf = bg_reps.astype(np.float64)                 # RGB 代表色
-        _ry = 0.299 * _rf[:, 0] + 0.587 * _rf[:, 1] + 0.114 * _rf[:, 2]
         chroma_dist = None
-        for _r, _y in zip(_rf, _ry, strict=True):
+        for _r, _y in zip(bg_reps.astype(np.float64), rep_luma, strict=True):
             d = (np.abs(ycc[:, :, 1] - ((_r[0] - _y) * 0.713 + 128.0))
                  + np.abs(ycc[:, :, 2] - ((_r[2] - _y) * 0.564 + 128.0)))
             chroma_dist = d if chroma_dist is None else np.minimum(chroma_dist, d)

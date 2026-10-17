@@ -1,6 +1,8 @@
 """Tests for photo-driven colorwork design (app/models/color_design.py)."""
+import numpy as np
 from PIL import Image, ImageDraw
 
+from app.models import subject
 from app.models.color_design import (
     PART_SPAN,
     blocks_summary_text,
@@ -28,6 +30,26 @@ def test_bands_extract_two_tones_and_merge():
     assert colors[-1] == "蓝色"             # 底部衣服带
     # start/end 覆盖 0..1 且单调
     assert bands[0]["start"] == 0.0 and bands[-1]["end"] == 1.0
+
+
+def _shaded_single_colour_subject():
+    """浅背景上的单色主体，下半身在阴影里（行程照常见）——真实照片的样子。"""
+    img = Image.new("RGB", (200, 400), (168, 168, 164))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([70, 20, 130, 390], radius=20, fill=(216, 200, 184))
+    d.rectangle([70, 280, 130, 390], fill=(120, 120, 104))  # 下段阴影（少数）
+    return img
+
+
+def test_bands_read_lit_colour_so_shading_is_not_a_second_colour(monkeypatch):
+    """单色玩偶不该因阴影被读成两色（真实照片里耳朵因此配成深灰色）。"""
+    img = _shaded_single_colour_subject()
+    colors = {b["color"] for b in vertical_color_bands(img, n_bands=10)}
+    assert len(colors) == 1 and "深灰色" not in colors
+    monkeypatch.setattr(subject, "shaded_area",
+                        lambda m, i: np.zeros(m.shape, bool))
+    plain = {b["color"] for b in vertical_color_bands(img, n_bands=10)}
+    assert "深灰色" in plain        # 不做"只取受光面"就会凭空多出阴影色
 
 
 def test_part_span_slices_bands():
