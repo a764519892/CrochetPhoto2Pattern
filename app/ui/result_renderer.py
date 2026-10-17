@@ -501,7 +501,8 @@ def render_results(result: dict, slot: str) -> None:
             "部件": part.get("name", "?"),
             "数量": part.get("count", 1),
             "形状": {"sphere": "球形", "cylinder": "圆柱", "cup": "开口杯形",
-                     "profile": "照片轮廓"}.get(part.get("shape"), part.get("shape", "—")),
+                     "profile": "照片轮廓", "ear": "长耳管（扁平）"}.get(
+                         part.get("shape"), part.get("shape", "—")),
             "尺寸": "，".join(dims) or "—",
             "位置 / 旋转": "；".join(poses) or "旧版未记录",
             "连接": "；".join(connections) or "独立部件 / 未记录",

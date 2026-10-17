@@ -293,6 +293,72 @@ def silhouette_profile(image: Image.Image, n_rows: int = 40, *,
         return None
 
 
+def _row_runs(row, min_len: int = 2) -> list[tuple[int, int]]:
+    """一行的前景连续段 (start, end)；宽度 <min_len 的段落按噪声丢弃。"""
+    import numpy as np
+
+    edges = np.diff(np.pad(row.astype(bool).astype(np.int8), (1, 1)))
+    starts = np.flatnonzero(edges == 1)
+    ends = np.flatnonzero(edges == -1)
+    return [(int(s), int(e)) for s, e in zip(starts, ends, strict=True)
+            if e - s >= min_len]
+
+
+def measure_ears(mask, *, narrow_ratio: float = 0.5,
+                 min_band_fraction: float = 0.08,
+                 max_band_fraction: float = 0.45) -> tuple[float, float] | None:
+    """正面掩码 → (耳长占比, 单耳宽占比)，均以"主体可见高度"为分母。
+
+    耳朵在正面掩码里的确定性几何特征是：**顶部有一段很长的"窄段"**。只用行内
+    前景段几何，不做语义识别：从顶部起，连续取"该行前景合计宽度 ≤ narrow_ratio
+    × 最宽行"的行作为耳波段。
+
+    为什么不是"顶部窄就行"：任何圆头都是从窄到宽长出来的（球顶第 1 行最窄），
+    但球顶只在很短的几行里低于峰值一半——兔子的耳朵能让"低于半宽"的段落占到
+    主体高度的 30%+，圆头娃娃只有约 5%。所以判据是**窄段的长度占比**：低于
+    min_band_fraction 视为没有独立耳朵，返回 None（不凭空加耳朵）。
+
+    长耳（兔/驴）窄段长、单耳窄 → 长宽比高；圆耳（熊/猫，两耳合计仍不及头宽
+    一半）窄段短而宽 → 接近 1:1，结构层据此选长耳管或球耳。
+    """
+    import numpy as np
+
+    if getattr(mask, "ndim", 0) != 2:
+        return None
+    total, widest, occupied = [], [], []
+    for row in mask:
+        runs = _row_runs(row)
+        total.append(sum(e - s for s, e in runs))
+        widest.append(max((e - s for s, e in runs), default=0))
+        occupied.append(bool(runs))
+    rows = [i for i, seen in enumerate(occupied) if seen]
+    if len(rows) < 8:
+        return None
+    top, bottom = rows[0], rows[-1]
+    height = bottom - top + 1
+    peak = max(total)
+    if peak <= 0:
+        return None
+    narrow = narrow_ratio * peak
+    band: list[int] = []
+    for i in range(top, bottom + 1):
+        if not occupied[i]:
+            continue                       # 段内空洞不结束窄段（噪声/高光水印）
+        if total[i] > narrow:
+            break
+        band.append(i)
+    if len(band) < max(3, int(min_band_fraction * height)):
+        return None
+    if len(band) > max_band_fraction * height:
+        # 耳朵不可能占主体高度的一大半：掩码没分开主体与背景（如大片高光/
+        # 水印把"最宽行"变成噪声）时，这里的窄段会一路走到底——宁可不报。
+        return None
+    width_ratio = float(np.median([widest[i] for i in band])) / height
+    if width_ratio <= 0:
+        return None
+    return len(band) / height, width_ratio
+
+
 def has_bottom_flare(profile: list[float]) -> bool:
     """Detect a lower-quarter flare within the occupied subject rows."""
     rows = [i for i, width in enumerate(profile) if width > 0.08]

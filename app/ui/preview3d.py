@@ -82,6 +82,19 @@ def build_payload(result: dict) -> dict[str, Any] | None:
                 "row_h": row_h,
             }
         else:
+            if shape == "ear":
+                # 长耳管的粗细逐圈变化：有真实圈数就走旋转体，别退化成等粗圆柱；
+                # 没有圈数可译时退回等粗圆柱示意。
+                rounds = rounds_by_name.get(name) or []
+                if rounds:
+                    entry["shape"] = "lathe"
+                    entry["lathe"] = {
+                        "radii": [max(0.15, int(r.get("stitches", 0)) * stitch_w
+                                      / (2 * 3.14159265)) for r in rounds],
+                        "row_h": row_h,
+                    }
+                else:
+                    shape = entry["shape"] = "cylinder"
             diameter = float(part.get("diameter_cm") or 0)
             if diameter <= 0:
                 # 圆柱/杯形部件的直径未存于结构层（由针数推导）：
