@@ -55,7 +55,8 @@ Unknown part names remain available for review. Remove mistaken labels or select
   also requires EGL/GLESv2 and safely falls back when the native runtime is unavailable.
 - Photo-derived yarn palettes, longitudinal color bands, and CIEDE2000 color matching.
   Color voting samples the lit surface only: shading and watermarks are not yarn
-  evidence, while dark detail still enters review.
+  evidence, while dark detail still enters review. Adjacent bands that differ only
+  by lighting are unified, so uneven light does not become a second colour.
 - Versioned template geometry with part instances, mirrored pairs, rotations, attachment
   anchors, and explicit inference provenance. Heuristics are uncalibrated; no confidence
   percentage is claimed. This is not full 3D reconstruction.
