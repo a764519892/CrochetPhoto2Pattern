@@ -94,23 +94,24 @@ def _ear_analysis(**ratios):
     )
 
 
-def test_measured_round_ear_stays_a_ball():
-    """照片测到近 1:1 的圆耳（熊/猫）仍做球耳，不强行拉成长管。"""
+def test_measured_round_lobe_still_becomes_a_tube():
+    """轮廓判出的耳朵一律做长管：正面掩码无法区分熊的圆耳与兔的长耳，
+    实测耳长又只是下界，所以量到再短也按耳长下限（2.4× 耳宽）做。"""
     ear = next(p for p in StructureDesigner.design_3d_structure(
         _ear_analysis(ear_length_ratio=0.06, ear_width_ratio=0.05))["parts"]
         if p["name"] == "耳朵")
-    assert ear["shape"] == "sphere"
-    assert "length_cm" not in ear
+    assert ear["shape"] == "ear"
+    assert ear["length_cm"] >= 2.4 * ear["diameter_cm"]
 
 
-def test_measured_long_ear_uses_measured_proportions():
-    """照片测到长耳 → 耳宽/耳长按实测占比 × 整体高度，而不是头径先验。"""
+def test_measured_long_ear_honours_the_measurement():
+    """实测耳长超过下限时以实测为准；耳宽按实测占比 × 整体高度。"""
     ear = next(p for p in StructureDesigner.design_3d_structure(
-        _ear_analysis(ear_length_ratio=0.26, ear_width_ratio=0.12))["parts"]
+        _ear_analysis(ear_length_ratio=0.45, ear_width_ratio=0.10))["parts"]
         if p["name"] == "耳朵")
     assert ear["shape"] == "ear"
-    assert ear["diameter_cm"] == pytest.approx(18.0 * 0.12, abs=0.1)
-    assert ear["length_cm"] == pytest.approx(18.0 * 0.26, abs=0.1)
+    assert ear["diameter_cm"] == pytest.approx(18.0 * 0.10, abs=0.1)
+    assert ear["length_cm"] == pytest.approx(18.0 * 0.45, abs=0.1)
 
 
 def test_hat_is_open_cup_with_slack():

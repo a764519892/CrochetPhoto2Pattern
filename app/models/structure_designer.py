@@ -18,11 +18,12 @@ logger = logging.getLogger(__name__)
 # 占比时以实测值覆盖（见 local_vision 的耳部观测 → ImageAnalysis.ear_*_ratio）。
 EAR_WIDTH_HEAD_RATIO = 0.33
 EAR_LENGTH_HEAD_RATIO = 1.1
-# 长宽比低于此值视为圆耳（熊/猫）：耳长与耳宽接近时做球，不做长管。
-# 阈值取 2.0 而非 1.6：实测耳长/耳宽由"顶部窄段占比"推得，窄段会延伸一点进
-# 头顶，量出的长宽比整体偏高（合成圆耳 1.33 实测 1.67）。兔子实测 2.4–3.5，
-# 熊/猫 1.2–1.7，2.0 留出干净余量。
-ROUND_EAR_ASPECT = 2.0
+# 耳长/耳宽下限。正面轮廓量到的耳长只是下界（耳根两侧与头合并后缺口就闭合
+# 了，实测兔子缺口只占主体高度 10%，真实耳长 ≈ 32%），所以只设下限：判定为
+# 耳朵就至少做成 2.4 倍耳宽的长管，而不是量到多短就做多短（那会退化成球）。
+# 轮廓也无法可靠区分长耳与圆耳——熊的圆耳和兔的长耳在正面掩码里都是"顶部
+# 两片"——因此默认长耳管；确实要做球耳需在结构里显式改成 sphere。
+EAR_MIN_ASPECT = 2.4
 
 
 class StructureDesigner:
@@ -155,23 +156,17 @@ class StructureDesigner:
         body_h = max(total_h - head_d, 0.1)  # protect against zero/negative
 
         dim = StructureDesigner._dimension
-        # 耳朵：优先用照片轮廓实测的耳长/耳宽占比；未测到则用长耳默认比例。
-        # 实测长宽比接近 1:1 → 球耳（熊/猫）；否则长耳管（兔/驴）。
+        # 耳朵：耳宽用照片轮廓实测占比（可靠）；耳长取实测与"耳长下限"的较大者
+        # （实测只是下界，见 EAR_MIN_ASPECT）；未测到耳宽则用长耳默认比例。
         ear_len_ratio = getattr(analysis, "ear_length_ratio", None)
         ear_w_ratio = getattr(analysis, "ear_width_ratio", None)
-        if ear_len_ratio and ear_w_ratio:
+        if ear_w_ratio:
             ear_w = dim(total_h * ear_w_ratio)
-            ear_l = dim(total_h * ear_len_ratio)
-            if ear_l / max(ear_w, 0.1) < ROUND_EAR_ASPECT:
-                ear_spec: dict[str, Any] = {"shape": "sphere", "diameter_cm": ear_w}
-            else:
-                ear_spec = {"shape": "ear", "diameter_cm": ear_w, "length_cm": ear_l}
+            ear_l = dim(max(total_h * (ear_len_ratio or 0.0), EAR_MIN_ASPECT * ear_w))
         else:
-            ear_spec = {
-                "shape": "ear",
-                "diameter_cm": dim(head_d * EAR_WIDTH_HEAD_RATIO),
-                "length_cm": dim(head_d * EAR_LENGTH_HEAD_RATIO),
-            }
+            ear_w = dim(head_d * EAR_WIDTH_HEAD_RATIO)
+            ear_l = dim(head_d * EAR_LENGTH_HEAD_RATIO)
+        ear_spec = {"shape": "ear", "diameter_cm": ear_w, "length_cm": ear_l}
         shape_map: dict[str, dict[str, Any]] = {
             "头部": {"shape": "sphere", "diameter_cm": head_d, "color": "skin"},
             "身体": {"shape": "cylinder", "height_cm": dim(body_h * 0.5), "color": "body"},

@@ -44,6 +44,35 @@ def _doll_mask() -> np.ndarray:
     return mask
 
 
+def _splayed_bunny_mask(ear_h: int = 40, ear_w: int = 18, gap: int = 6,
+                        head_h: int = 45, head_w: int = 40,
+                        body_h: int = 30) -> np.ndarray:
+    """外张长耳：两耳合计宽度已接近头宽，顶部并**不**窄——只有耳间缺口能
+    说明这里分开过。窄带判据会有意漏掉它，分裂判据必须抓到（真实照片即此形）。"""
+    mask = np.zeros((H, W), bool)
+    cx = W // 2
+    for x0 in (cx - gap // 2 - ear_w, cx + gap // 2):
+        mask[:ear_h, x0:x0 + ear_w] = True
+    for i in range(head_h):
+        half = int(head_w / 2 * np.sin(np.pi * (i + 0.5) / head_h) ** 0.35) or 1
+        mask[ear_h + i, cx - half:cx + half] = True
+    mask[ear_h + head_h:ear_h + head_h + body_h,
+         cx - head_w // 2:cx + head_w // 2] = True
+    return mask
+
+
+def test_splayed_ears_are_measured_from_the_split_not_the_width():
+    """外张耳（真实照片形态）：顶部合计宽度 > 峰值一半 → 窄带判据失效，
+    必须靠"分裂成两段"识别；且测出的耳宽是单耳宽而非合计宽度。"""
+    got = measure_ears(_splayed_bunny_mask())
+    assert got is not None
+    length_ratio, width_ratio = got
+    # 波段从耳尖到"头顶不再是窄/分裂"为止：耳 40 行 + 头顶前几行（也窄）
+    assert 40 / 115 <= length_ratio <= 45 / 115
+    assert width_ratio == pytest.approx(18 / 115, abs=0.02)
+    assert length_ratio / width_ratio > 2.0
+
+
 def test_long_ears_are_measured():
     got = measure_ears(_bunny_mask())
     assert got is not None
@@ -120,8 +149,8 @@ def test_photo_to_pattern_end_to_end_gives_a_long_ear():
     assert ear["rounds"][-1]["stitches"] < ear["rounds"][-2]["stitches"]  # 耳尖收口
 
 
-def test_round_ear_ratio_keeps_a_ball():
-    """实测近 1:1（熊/猫）→ 结构层做球耳，图解不走长耳管。"""
+def test_round_lobe_ratio_still_makes_a_long_tube():
+    """轮廓量到的耳长只是下界：圆形耳片也按长耳下限做管，不做成球。"""
     analysis = ImageAnalysis(
         body_type="标准", head_diameter_cm=9.0, height_cm=18.0,
         main_features=[], pose="站立", difficulty="easy",
@@ -129,4 +158,6 @@ def test_round_ear_ratio_keeps_a_ball():
     )
     structure = StructureDesigner.design_3d_structure(analysis)
     ear_spec = next(p for p in structure["parts"] if p["name"] == "耳朵")
-    assert ear_spec["shape"] == "sphere"
+    assert ear_spec["shape"] == "ear"
+    # dim() 按 0.1cm 取整，故留一个最小刻度容差
+    assert ear_spec["length_cm"] >= 2.4 * ear_spec["diameter_cm"] - 0.1

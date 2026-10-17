@@ -306,31 +306,34 @@ def _row_runs(row, min_len: int = 2) -> list[tuple[int, int]]:
 
 def measure_ears(mask, *, narrow_ratio: float = 0.5,
                  min_band_fraction: float = 0.08,
-                 max_band_fraction: float = 0.45) -> tuple[float, float] | None:
-    """正面掩码 → (耳长占比, 单耳宽占比)，均以"主体可见高度"为分母。
+                 max_band_fraction: float = 0.45,
+                 min_run: int = 3) -> tuple[float, float] | None:
+    """正面掩码 → (耳长占比, 耳宽占比)，均以"主体可见高度"为分母。
 
-    耳朵在正面掩码里的确定性几何特征是：**顶部有一段很长的"窄段"**。只用行内
-    前景段几何，不做语义识别：从顶部起，连续取"该行前景合计宽度 ≤ narrow_ratio
-    × 最宽行"的行作为耳波段。
+    耳朵在正面掩码里有两种确定性几何特征，任一成立即算耳波段：
 
-    为什么不是"顶部窄就行"：任何圆头都是从窄到宽长出来的（球顶第 1 行最窄），
-    但球顶只在很短的几行里低于峰值一半——兔子的耳朵能让"低于半宽"的段落占到
-    主体高度的 30%+，圆头娃娃只有约 5%。所以判据是**窄段的长度占比**：低于
-    min_band_fraction 视为没有独立耳朵，返回 None（不凭空加耳朵）。
+      A. **窄**：并拢/细长的耳朵，顶部合计宽度 ≤ narrow_ratio × 最宽行。判据是
+         这段窄带能持续多长——任何圆头都是从窄长起来的（球顶第 1 行最窄），但
+         球顶只在很短几行里低于峰值一半，长耳能占到主体高度的 30%+。
+      B. **分**：外张的长耳（两耳合计宽度已接近头宽），顶部几行分裂成 ≥2 段
+         （耳间缺口），向下合并成一段即结束。
 
-    长耳（兔/驴）窄段长、单耳窄 → 长宽比高；圆耳（熊/猫，两耳合计仍不及头宽
-    一半）窄段短而宽 → 接近 1:1，结构层据此选长耳管或球耳。
+    耳宽取每行**前景段宽度的中位数**（分裂行 = 单耳宽，单段行 = 该段宽），
+    避免"耳根与头合并"把宽度算大。耳长是**下界**：正面轮廓里缺口通常在耳根
+    之前就闭合，真实耳长可能更长——结构层据此只设下限、不设上限。
+
+    上下界（8%–45%）既排掉圆头（窄段过短）也排掉没分开主体/背景的掩码
+    （窄段一路到底）。测不到返回 None，调用方不凭空加耳朵。
     """
     import numpy as np
 
-    if getattr(mask, "ndim", 0) != 2:
+    if getattr(mask, "ndim", 0) != 2 or mask.shape[0] < 8:
         return None
-    total, widest, occupied = [], [], []
-    for row in mask:
-        runs = _row_runs(row)
-        total.append(sum(e - s for s, e in runs))
-        widest.append(max((e - s for s, e in runs), default=0))
-        occupied.append(bool(runs))
+    runs_per_row = [_row_runs(row, min_len=min_run) for row in mask]
+    total = [sum(e - s for s, e in runs) for runs in runs_per_row]
+    median_run = [float(np.median([e - s for s, e in runs])) if runs else 0.0
+                  for runs in runs_per_row]
+    occupied = [bool(runs) for runs in runs_per_row]
     rows = [i for i, seen in enumerate(occupied) if seen]
     if len(rows) < 8:
         return None
@@ -343,17 +346,16 @@ def measure_ears(mask, *, narrow_ratio: float = 0.5,
     band: list[int] = []
     for i in range(top, bottom + 1):
         if not occupied[i]:
-            continue                       # 段内空洞不结束窄段（噪声/高光水印）
-        if total[i] > narrow:
+            continue                       # 段内空洞不结束（噪声/高光水印）
+        if total[i] > narrow and len(runs_per_row[i]) < 2:
             break
         band.append(i)
     if len(band) < max(3, int(min_band_fraction * height)):
         return None
     if len(band) > max_band_fraction * height:
-        # 耳朵不可能占主体高度的一大半：掩码没分开主体与背景（如大片高光/
-        # 水印把"最宽行"变成噪声）时，这里的窄段会一路走到底——宁可不报。
+        # 耳朵不可能占主体高度的一大半：掩码没分开主体与背景时窄段会一路走到底
         return None
-    width_ratio = float(np.median([widest[i] for i in band])) / height
+    width_ratio = float(np.median([median_run[i] for i in band])) / height
     if width_ratio <= 0:
         return None
     return len(band) / height, width_ratio
