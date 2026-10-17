@@ -56,6 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--md", help="额外输出 Markdown 图解路径")
     parser.add_argument("--parade", help="额外输出 CrochetPARADE DSL 路径"
                         "（粘贴到 crochetparade.org 可得 3D 渲染与针目张力分析）")
+    parser.add_argument("--assemble", action="store_true",
+                        help="在 --parade 的 DSL 末尾追加装配块：DOT: separate=0 "
+                             "把独立部件收回原点，再按解剖布局给出 TRANSFORM_OBJECT "
+                             "平移（旋转需在 CP 的 Object Transform 面板摆正）")
     parser.add_argument("--pdf", help="额外输出 PDF 路径（需 reportlab）")
     parser.add_argument("--quiet", action="store_true", help="不打印摘要")
     return parser
@@ -228,7 +232,11 @@ def main(argv=None) -> int:
             print("--pdf 在批量模式下按每图 <stem>.pdf 导出", file=sys.stderr)
         if args.parade:
             print("--parade 在批量模式下按每图 <stem>.parade.txt 导出", file=sys.stderr)
+        if args.assemble and not args.parade:
+            print("--assemble 需要 --parade，已忽略", file=sys.stderr)
         return run_batch(args)
+    if args.assemble and not args.parade:
+        print("--assemble 需要 --parade，已忽略", file=sys.stderr)
     from app.utils.output_files import output_paths, write_outputs
 
     try:
@@ -260,7 +268,8 @@ def main(argv=None) -> int:
                 result["params"], result["analysis"], result=result).encode("utf-8")
         if args.parade:
             from app.utils.parade_export import export_parade_dsl
-            exports["parade"] = export_parade_dsl(result).encode("utf-8")
+            exports["parade"] = export_parade_dsl(
+                result, assemble=args.assemble).encode("utf-8")
         if args.pdf:
             from app.utils.pdf_export import export_pdf
             exports["pdf"] = export_pdf(result["params"], result["analysis"], result=result)
