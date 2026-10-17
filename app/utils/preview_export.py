@@ -54,6 +54,65 @@ def preview_svg(result: dict[str, Any]) -> str:
     return svg
 
 
+def part_previews(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """分解图用：每个可渲染部件单独成帧（真实圈数旋转体 + 圈数/针数/尺寸）。
+
+    与成品预览同源（:func:`app.ui.preview3d.assembly_payload` 的真实圈数旋转体与
+    配色），但每件只取一个实例、平移到原点单独渲染——渲染器按高度归一化，单件
+    因此也会充满画幅，不会与其他部件互相遮挡，便于在说明书里逐件标注。
+    """
+    from app.ui.preview3d import assembly_payload, render_payload_svg
+
+    payload = assembly_payload(result) or {}
+    parts_by_name: dict[str, dict[str, Any]] = {}
+    for entry in (result.get("params") or {}).get("parts", []) or []:
+        part = entry if isinstance(entry, dict) else (
+            entry.model_dump() if hasattr(entry, "model_dump") else {})
+        parts_by_name.setdefault(str(part.get("name")), part)
+
+    previews: list[dict[str, Any]] = []
+    for item in payload.get("items") or []:
+        lathe = item.get("lathe") or {}
+        radii = [float(r) for r in lathe.get("radii") or []]
+        row_h = float(lathe.get("row_h") or 0.0)
+        if not radii or row_h <= 0:
+            continue
+        single = {
+            "height": payload.get("height", 18.0),
+            # 单件成帧会正对旋转体底部的收口锥，背面被剔除就会漏出背景（看着
+            # 像空壳）；这里按 item 打开背面（压暗）——成品装配图不受影响。
+            "items": [{**item, "backfaces": True,
+                       "instances": [{"p": [0.0, 0.0, 0.0], "r": [0.0, 0.0, 0.0]}]}],
+        }
+        svg = render_payload_svg(single)
+        if not svg:
+            continue
+        part = parts_by_name.get(str(item.get("name")), {})
+        stitches = _max_stitches(part.get("rounds"))
+        previews.append({
+            "name": str(item.get("name") or ""),
+            "quantity": part.get("quantity"),
+            "rounds": len(radii),
+            "max_stitches": stitches,
+            "diameter_cm": round(max(radii) * 2, 1),
+            "height_cm": round(len(radii) * row_h, 1),
+            "svg": svg,
+        })
+    return previews
+
+
+def _max_stitches(rounds: Any) -> int:
+    best = 0
+    for entry in rounds or []:
+        row = entry if isinstance(entry, dict) else (
+            entry.model_dump() if hasattr(entry, "model_dump") else {})
+        try:
+            best = max(best, int(row.get("stitches") or 0))
+        except (TypeError, ValueError):
+            continue
+    return best
+
+
 def export_preview(result: dict[str, Any], path: str | Path) -> bytes:
     """按后缀导出预览图（``.svg`` 矢量 / ``.png`` 位图）。"""
     suffix = Path(path).suffix.lower()
