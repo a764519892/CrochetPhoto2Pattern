@@ -86,6 +86,8 @@ Unknown part names remain available for review. Remove mistaken labels or select
 - Editable 2D grid projects for tapestry, C2C, and cross-stitch workflows.
 - Stitch-arithmetic validation, ring charts, progress tracking, per-color bills of
   materials, share links, SQLite history, JSON backup, Markdown, and optional PDF export.
+- Finished-doll preview export: `--preview` writes the same assembly preview the result
+  page renders (real rounds as a lathe plus the anatomical layout) as `.svg` or `.png`.
 - EXIF orientation correction and defensive image/input size limits.
 - Authorized-photo evaluation and independent physical-trial tooling.
 
@@ -158,6 +160,7 @@ uv run crochet2pattern --image photo.jpg --gauge dk --out pattern.json --md patt
 uv run crochet2pattern --head 9 --height 18 --parts 头部,身体 --sphere-mode egg --out p.json
 uv run crochet2pattern --mock --out demo.json
 uv run crochet2pattern --batch-dir photos/ --out-dir patterns/
+uv run crochet2pattern --image photo.jpg --preview preview.png  # finished-doll preview (.svg/.png)
 ```
 
 Canonical part values in the current schema are Chinese (`头部`, `身体`, and so on), so

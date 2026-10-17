@@ -8,6 +8,12 @@ formats may still evolve during Beta; incompatible changes must include migratio
 
 ## Unreleased
 
+### Added — 2026-10-17 CLI finished-doll preview export
+
+- `--preview` writes the finished-doll preview using the same renderer as the result page (each part's real rounds as a lathe, placed by the same anatomical layout as `--assemble`), as `.svg` vector or `.png` raster; batch mode exports `<stem>.preview<ext>` per image.
+- The PNG is rasterised with Pillow from the preview SVG's own dialect (background rect + painter-ordered polygons + one caption line), so no cairosvg dependency. The caption is Chinese and needs a system CJK font; without one only the shapes are drawn (the vector SVG always carries the caption and is the lossless copy).
+- The new output reuses the existing preflight: path conflicts with the input photo or other outputs, and unsupported formats, fail before generation. The preview is not a physical simulation.
+
 ### Added — 2026-10-15 Foreground correction brush
 
 - Add a local photo canvas with add/erase, brush sizing, overlay visibility, undo for the last 20 strokes and reset to automatic segmentation. Each completed stroke updates the selection.

@@ -67,6 +67,7 @@
 - 🩺 图解自检：针数代数逐圈校验，矛盾直接标出
 - ⭕ 环形圈数图：部件顶视图，内圈起针外圈收尾，配色一目了然
 - 💾 完整结果备份/导入（JSON）+ 部署主机图解历史（SQLite，默认关闭，侧栏随时载回）+ PDF 打印导出（可选 `pip install .[pdf]`）
+- 🖼️ 成品预览图导出：`--preview` 落盘与结果页同一张装配预览（真实圈数旋转体 + 解剖布局），`.svg` 矢量或 `.png` 位图
 - 🖼️ EXIF 方向自动修正（手机竖拍照片直出正确比例）
 
 ## 🛠 技术栈
@@ -119,6 +120,7 @@ uv run crochet2pattern --image photo.jpg --gauge dk --out pattern.json --md patt
 uv run crochet2pattern --head 9 --height 18 --parts 头部,身体 --sphere-mode egg --out p.json
 uv run crochet2pattern --mock --out demo.json                       # 固定演示数据
 uv run crochet2pattern --batch-dir photos/ --out-dir patterns/      # 目录批量生成
+uv run crochet2pattern --image photo.jpg --preview preview.png      # 成品预览图（.svg 矢量 / .png 位图）
 ```
 
 照片模式始终使用本地算法，旧版 Key 不会触发云端调用。所有输出经过图解自检门禁（代数矛盾

@@ -24,6 +24,7 @@ from app.models.structure_designer import StructureDesigner
 from app.schemas import PART_NAMES, ImageAnalysis, PatternResult
 from app.utils.exporters import export_markdown
 from app.utils.images import load_image_file
+from app.utils.preview_export import PREVIEW_SUFFIXES
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -61,6 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
                              "把独立部件收回原点，再按解剖布局给出 TRANSFORM_OBJECT "
                              "平移（旋转需在 CP 的 Object Transform 面板摆正）")
     parser.add_argument("--pdf", help="额外输出 PDF 路径（需 reportlab）")
+    parser.add_argument("--preview", help="额外输出成品预览图路径（.svg 矢量 / .png 位图；"
+                                          "与结果页同一渲染器：真实圈数旋转体 + 解剖布局）")
     parser.add_argument("--quiet", action="store_true", help="不打印摘要")
     return parser
 
@@ -203,6 +206,10 @@ def run_batch(args) -> int:
                                            if args.pdf else None),
                                    "parade": (str(out_dir / f"{stem}.parade.txt")
                                               if args.parade else None),
+                                   "preview": (str(out_dir / f"{stem}.preview"
+                                                   f"{Path(args.preview).suffix}")
+                                               if getattr(args, "preview", None)
+                                               else None),
                                    "batch_dir": None})
         try:
             rc = main(ns)
@@ -227,11 +234,19 @@ def main(argv=None) -> int:
     # argv 可为参数列表或已构造的 Namespace（run_batch 内部复用）
     args = (argv if isinstance(argv, argparse.Namespace)
             else build_parser().parse_args(argv))
+    preview = getattr(args, "preview", None)
+    if preview and Path(preview).suffix.lower() not in PREVIEW_SUFFIXES:
+        # 格式在生成前就判：不合法的后缀不该先跑完整条管线再失败。
+        print(f"预览格式不支持: {preview}（用 .svg 或 .png）", file=sys.stderr)
+        return 1
     if args.batch_dir:
         if args.pdf:
             print("--pdf 在批量模式下按每图 <stem>.pdf 导出", file=sys.stderr)
         if args.parade:
             print("--parade 在批量模式下按每图 <stem>.parade.txt 导出", file=sys.stderr)
+        if preview:
+            print("--preview 在批量模式下按每图 <stem>.preview<ext> 导出",
+                  file=sys.stderr)
         if args.assemble and not args.parade:
             print("--assemble 需要 --parade，已忽略", file=sys.stderr)
         return run_batch(args)
@@ -273,6 +288,9 @@ def main(argv=None) -> int:
         if args.pdf:
             from app.utils.pdf_export import export_pdf
             exports["pdf"] = export_pdf(result["params"], result["analysis"], result=result)
+        if preview:
+            from app.utils.preview_export import export_preview
+            exports["preview"] = export_preview(result, paths["preview"])
         write_outputs({path: exports[kind] for kind, path in paths.items()})
     except Exception as exc:
         print(f"导出失败: {exc}", file=sys.stderr)
